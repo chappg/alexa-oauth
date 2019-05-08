@@ -1,0 +1,33 @@
+spring:
+    datasource:
+        driver-class-name: org.h2.Driver
+        jdbc-url: jdbc:h2:file:~/testdb;DB_CLOSE_ON_EXIT=FALSE;IFEXISTS=TRUE;DB_CLOSE_DELAY=-1;
+        username: sa
+        password:
+    jpa:
+      hibernate:
+        ddl-auto: none
+    h2:
+      console:
+        enabled: true
+server:
+  port: 5000
+  tomcat:
+    use-relative-redirects: true
+
+logging:
+  level:
+    org:
+      springframework:
+        security: DEBUG
+        web:
+          filter:
+            CommonsRequestLoggingFilter: DEBUG
+
+
+client:
+  alexa:
+    clientId: xxxxxx
+    clientSecret: xxxxxx
+    accessTokenUri: https://api.amazon.com/auth/o2/token
+    userAuthorizationUri: https://www.amazon.com/ap/oa

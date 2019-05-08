@@ -1,0 +1,458 @@
+{
+  "Description": "Deploy an Elastic Beanstalk app stored in CodeCommit via CodePipeline.",
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Parameters": {
+    "RepositoryName": {
+      "Description": "The name of your repo.",
+      "Type": "String",
+      "Default": "oauth-server"
+    },
+    "BranchName": {
+      "Description": "The name of the repo branch",
+      "Type": "String",
+      "Default": "master"
+    },
+    "GitHubOwner": {
+      "Type": "String"
+    },
+    "GitHubOAuthToken": {
+      "Type": "String",
+      "NoEcho": true
+    }
+  },
+  "Resources": {
+    "CodePipelineArtifactStoreBucket": {
+      "Type": "AWS::S3::Bucket"
+    },
+    "OAuthApplication": {
+      "Type": "AWS::ElasticBeanstalk::Application",
+      "Properties": {
+        "Description": "AWS Elastic Beanstalk Sample Application"
+      }
+    },
+    "OAuthApplicationVersion": {
+      "Type": "AWS::ElasticBeanstalk::ApplicationVersion",
+      "Properties": {
+        "ApplicationName": {
+          "Ref": "OAuthApplication"
+        },
+        "Description": "AWS ElasticBeanstalk Sample Application Version",
+        "SourceBundle": {
+          "S3Bucket": "alexa-oauth-sample",
+          "S3Key": "alexa-oauth-sample.jar"
+        }
+      }
+    },
+    "OAuthConfigurationTemplate": {
+      "Type": "AWS::ElasticBeanstalk::ConfigurationTemplate",
+      "Properties": {
+        "ApplicationName": {
+          "Ref": "OAuthApplication"
+        },
+        "Description": "AWS ElasticBeanstalk Sample Configuration Template",
+        "OptionSettings": [
+          {
+            "Namespace": "aws:elasticbeanstalk:command",
+            "OptionName": "DeploymentPolicy",
+            "Value": "Rolling"
+          },
+          {
+            "Namespace": "aws:elasticbeanstalk:command",
+            "OptionName": "BatchSize",
+            "Value": "50"
+          },
+          {
+            "Namespace": "aws:autoscaling:asg",
+            "OptionName": "MinSize",
+            "Value": "2"
+          },
+          {
+            "Namespace": "aws:autoscaling:asg",
+            "OptionName": "MaxSize",
+            "Value": "6"
+          },
+          {
+            "Namespace": "aws:elasticbeanstalk:environment",
+            "OptionName": "EnvironmentType",
+            "Value": "LoadBalanced"
+          },
+          {
+            "Namespace": "aws:rds:dbinstance",
+            "OptionName": "DBDeletionPolicy",
+            "Value": "Snapshot"
+          },
+          {
+            "Namespace": "aws:rds:dbinstance",
+            "OptionName": "DBAllocatedStorage",
+            "Value": "10"
+          },
+          {
+            "Namespace": "aws:rds:dbinstance",
+            "OptionName": "DBInstanceClass",
+            "Value": "db.t2.micro"
+          }
+        ],
+        "SolutionStackName": "64bit Amazon Linux 2018.03 v2.8.3 running Java 8"
+      }
+    },
+    "OAuthEnvironment": {
+      "Type": "AWS::ElasticBeanstalk::Environment",
+      "DependsOn": [
+        "OAuthApplication",
+        "OAuthConfigurationTemplate",
+        "OAuthApplicationVersion"
+      ],
+      "Properties": {
+        "ApplicationName": {
+          "Ref": "OAuthApplication"
+        },
+        "Description": "AWS ElasticBeanstalk Sample OAuth Environment",
+        "TemplateName": {
+          "Ref": "OAuthConfigurationTemplate"
+        },
+        "VersionLabel": {
+          "Ref": "OAuthApplicationVersion"
+        }
+      }
+    },
+    "CodePipelineRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": [
+                  "codebuild.amazonaws.com",
+                  "codedeploy.amazonaws.com",
+                  "codepipeline.amazonaws.com",
+                  "codestar.amazonaws.com",
+                  "elasticbeanstalk.amazonaws.com",
+                  "events.amazonaws.com",
+                  "lambda.amazonaws.com"
+                ]
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/AWSCodeCommitFullAccess",
+          "arn:aws:iam::aws:policy/AWSCodeBuildAdminAccess",
+          "arn:aws:iam::aws:policy/AWSCodeDeployFullAccess",
+          "arn:aws:iam::aws:policy/AWSCodePipelineFullAccess",
+          "arn:aws:iam::aws:policy/AWSElasticBeanstalkFullAccess",
+          "arn:aws:iam::aws:policy/AWSLambdaFullAccess",
+          "arn:aws:iam::aws:policy/AWSCodeStarFullAccess",
+          "arn:aws:iam::aws:policy/CloudWatchEventsFullAccess"
+        ],
+        "Path": "/",
+        "Policies": [
+          {
+            "PolicyName": "codepipeline-service",
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": [
+                    "kms:GenerateDataKey*",
+                    "kms:Encrypt",
+                    "kms:Decrypt"
+                  ],
+                  "Effect": "Allow",
+                  "Resource": "*"
+                },
+                {
+                  "Action": [
+                    "codecommit:GetBranch",
+                    "codecommit:GetCommit",
+                    "codecommit:UploadArchive",
+                    "codecommit:GetUploadArchiveStatus",
+                    "codecommit:CancelUploadArchive"
+                  ],
+                  "Resource": "*",
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "s3:GetObject",
+                    "s3:GetObjectVersion",
+                    "s3:GetBucketVersioning"
+                  ],
+                  "Resource": "*",
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "s3:PutObject"
+                  ],
+                  "Resource": [
+                    "arn:aws:s3:::codepipeline*",
+                    "arn:aws:s3:::elasticbeanstalk*"
+                  ],
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "codedeploy:CreateDeployment",
+                    "codedeploy:GetApplicationRevision",
+                    "codedeploy:GetDeployment",
+                    "codedeploy:GetDeploymentConfig",
+                    "codedeploy:RegisterApplicationRevision"
+                  ],
+                  "Resource": "*",
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "elasticbeanstalk:*",
+                    "ec2:*",
+                    "elasticloadbalancing:*",
+                    "autoscaling:*",
+                    "cloudwatch:*",
+                    "s3:*",
+                    "sns:*",
+                    "cloudformation:*",
+                    "rds:*",
+                    "sqs:*",
+                    "ecs:*",
+                    "iam:PassRole"
+                  ],
+                  "Resource": "*",
+                  "Effect": "Allow"
+                },
+                {
+                  "Action": [
+                    "lambda:InvokeFunction",
+                    "lambda:ListFunctions"
+                  ],
+                  "Resource": "*",
+                  "Effect": "Allow"
+                }
+              ],
+              "Version": "2012-10-17"
+            }
+          }
+        ]
+      }
+    },
+    "CodeBuildProject": {
+      "DependsOn": [
+        "CodePipelineRole"
+      ],
+      "Properties": {
+        "Name": "OAuthBuild",
+        "Artifacts": {
+          "Packaging": "zip",
+          "Type": "codepipeline"
+        },
+        "Environment": {
+          "ComputeType": "small",
+          "Image": "aws/codebuild/eb-java-8-amazonlinux-64:2.4.3",
+          "Type": "LINUX_CONTAINER"
+        },
+        "ServiceRole": {
+          "Ref": "CodePipelineRole"
+        },
+        "Source": {
+          "Type": "codepipeline"
+        }
+      },
+      "Type": "AWS::CodeBuild::Project"
+    },
+    "CodePipelineStack": {
+      "Type": "AWS::CodePipeline::Pipeline",
+      "DependsOn": [
+        "OAuthApplication",
+        "OAuthEnvironment"
+      ],
+      "Properties": {
+        "RoleArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:aws:iam::",
+              {
+                "Ref": "AWS::AccountId"
+              },
+              ":role/",
+              {
+                "Ref": "CodePipelineRole"
+              }
+            ]
+          ]
+        },
+        "Stages": [
+          {
+            "Name": "Source",
+            "Actions": [
+              {
+                "Name": "SourceAction",
+                "ActionTypeId": {
+                  "Category": "Source",
+                  "Owner": "ThirdParty",
+                  "Version": 1,
+                  "Provider": "GitHub"
+                },
+                "OutputArtifacts": [
+                  {
+                    "Name": "SourceOutput"
+                  }
+                ],
+                "Configuration": {
+                  "Owner": {
+                    "Ref": "GitHubOwner"
+                  },
+                  "Repo": {
+                    "Ref": "RepositoryName"
+                  },
+                  "Branch": {
+                    "Ref": "BranchName"
+                  },
+                  "OAuthToken": {
+                    "Ref": "GitHubOAuthToken"
+                  },
+                  "PollForSourceChanges": true
+                },
+                "RunOrder": 1
+              }
+            ]
+          },
+          {
+            "Name": "Build",
+            "Actions": [
+              {
+                "Name": "CodeBuild",
+                "InputArtifacts": [
+                  {
+                    "Name": "SourceOutput"
+                  }
+                ],
+                "ActionTypeId": {
+                  "Category": "Build",
+                  "Owner": "AWS",
+                  "Provider": "CodeBuild",
+                  "Version": 1
+                },
+                "Configuration": {
+                  "ProjectName": "OAuthBuild"
+                },
+                "OutputArtifacts": [
+                  {
+                    "Name": {
+                      "Fn::Sub": "BuildArtifact"
+                    }
+                  }
+                ],
+                "RunOrder": 1
+              }
+            ]
+          },
+          {
+            "Name": "Deploy",
+            "Actions": [
+              {
+                "InputArtifacts": [
+                  {
+                    "Name": "BuildArtifact"
+                  }
+                ],
+                "Name": "EbApp",
+                "ActionTypeId": {
+                  "Category": "Deploy",
+                  "Owner": "AWS",
+                  "Version": "1",
+                  "Provider": "ElasticBeanstalk"
+                },
+                "OutputArtifacts": [
+                ],
+                "Configuration": {
+                  "ApplicationName": {
+                    "Ref": "OAuthApplication"
+                  },
+                  "EnvironmentName": {
+                    "Ref": "OAuthEnvironment"
+                  }
+                },
+                "RunOrder": 1
+              }
+            ]
+          }
+        ],
+        "ArtifactStore": {
+          "Type": "S3",
+          "Location": {
+            "Ref": "CodePipelineArtifactStoreBucket"
+          }
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "AppURL": {
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            "http://",
+            {
+              "Fn::GetAtt": [
+                "OAuthEnvironment",
+                "EndpointURL"
+              ]
+            },
+            "/"
+          ]
+        ]
+      },
+      "Description": "URL for the working OAuth application"
+    },
+    "CodePipelineURL": {
+      "Value": {
+        "Fn::Join": [
+          "",
+          [
+            "https://console.aws.amazon.com/codepipeline/home?region=",
+            {
+              "Ref": "AWS::Region"
+            },
+            "#/view/",
+            {
+              "Ref": "CodePipelineStack"
+            }
+          ]
+        ]
+      },
+      "Description": "Pipeline URL"
+    },
+    "OAuthApplication": {
+      "Value": {
+        "Ref": "OAuthApplication"
+      }
+    },
+    "OAuthApplicationVersion": {
+      "Value": {
+        "Ref": "OAuthApplicationVersion"
+      },
+      "Description": "The Elastic Beanstalk application"
+    },
+    "OAuthConfigurationTemplate": {
+      "Value": {
+        "Ref": "OAuthConfigurationTemplate"
+      },
+      "Description": "The Elastic Beanstalk configuration"
+    },
+    "OAuthEnvironment": {
+      "Value": {
+        "Ref": "OAuthEnvironment"
+      },
+      "Description": "The Elastic Beanstalk environment on which the application runs"
+    },
+    "CodePipelineRole": {
+      "Value": {
+        "Ref": "CodePipelineRole"
+      },
+      "Description": "The IAM role associated with CodePipeline pipeline"
+    }
+  }
+}
